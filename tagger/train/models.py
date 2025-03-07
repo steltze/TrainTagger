@@ -3,6 +3,7 @@ Here all the models are defined to be called in train.py
 """
 import tensorflow as tf
 from tensorflow.keras.layers import BatchNormalization, Input, Activation, GlobalAveragePooling1D
+from tensorflow.keras import layers
 
 # Qkeras
 from qkeras.quantizers import quantized_bits, quantized_relu
@@ -20,10 +21,11 @@ def baseline(inputs_shape, output_shape, bits=9, bits_int=2, alpha_val=1):
     }
 
     #Initialize inputs
-    inputs = tf.keras.layers.Input(shape=inputs_shape, name='model_input')
-
+    # inputs = tf.keras.layers.Input(shape=inputs_shape, name='model_input')
+    inputs = Input(shape=(None, inputs_shape[-1]), name='model_input')  # Allow arbitrary input size
+    masked_inputs = layers.Masking(mask_value=0.0)(inputs)
     #Main branch
-    main = BatchNormalization(name='norm_input')(inputs)
+    main = BatchNormalization(name='norm_input')(masked_inputs)
     
     #First Conv1D
     main = QConv1D(filters=10, kernel_size=1, name='Conv1D_1', **common_args)(main)
@@ -49,17 +51,17 @@ def baseline(inputs_shape, output_shape, bits=9, bits_int=2, alpha_val=1):
     jet_id = QDense(output_shape[0], name='Dense_3_jetID', **common_args)(jet_id)
     jet_id = Activation('softmax', name='jet_id_output')(jet_id)
 
-    #pT regression branch
-    pt_regress = QDense(10, name='Dense_1_pT', **common_args)(main)
-    pt_regress = QActivation(activation=quantized_relu(bits), name='relu_1_pt')(pt_regress)
+    # #pT regression branch
+    # pt_regress = QDense(10, name='Dense_1_pT', **common_args)(main)
+    # pt_regress = QActivation(activation=quantized_relu(bits), name='relu_1_pt')(pt_regress)
 
-    pt_regress = QDense(1, name='pT_output',
-                        kernel_quantizer=quantized_bits(16, 6, alpha=alpha_val),
-                        bias_quantizer=quantized_bits(16, 6, alpha=alpha_val),
-                        kernel_initializer='lecun_uniform')(pt_regress)
+    # pt_regress = QDense(1, name='pT_output',
+    #                     kernel_quantizer=quantized_bits(16, 6, alpha=alpha_val),
+    #                     bias_quantizer=quantized_bits(16, 6, alpha=alpha_val),
+    #                     kernel_initializer='lecun_uniform')(pt_regress)
 
     #Define the model using both branches
-    model = tf.keras.Model(inputs = inputs, outputs = [jet_id, pt_regress])
+    model = tf.keras.Model(inputs = inputs, outputs = jet_id)
 
     print(model.summary())
 
