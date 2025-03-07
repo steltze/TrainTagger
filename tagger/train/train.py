@@ -2,8 +2,8 @@ from argparse import ArgumentParser
 import os, shutil, json
 
 #Import from other modules
-from tagger.data.tools import make_data, load_data, to_ML
-from tagger.plot.basic import loss_history, basic
+# from tagger.data.tools import make_data, load_data, to_ML
+# from tagger.plot.basic import loss_history, basic
 import models
 
 #Third parties
@@ -11,6 +11,8 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_model_optimization as tfmot
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from tensorflow import keras
+
 from sklearn.utils.class_weight import compute_class_weight
 import mlflow
 from datetime import datetime
@@ -52,9 +54,9 @@ def prune_model(model, num_samples):
     pruned_model = tfmot.sparsity.keras.prune_low_magnitude(model, **pruning_params)
 
     pruned_model.compile(optimizer='adam',
-                            loss={'prune_low_magnitude_jet_id_output': 'categorical_crossentropy', 'prune_low_magnitude_pT_output': tf.keras.losses.Huber()},
-                            metrics = {'prune_low_magnitude_jet_id_output': 'categorical_accuracy', 'prune_low_magnitude_pT_output': ['mae', 'mean_squared_error']},
-                            weighted_metrics = {'prune_low_magnitude_jet_id_output': 'categorical_accuracy', 'prune_low_magnitude_pT_output': ['mae', 'mean_squared_error']})
+                            loss={'prune_low_magnitude_jet_id_output': 'categorical_crossentropy'},
+                            metrics = {'prune_low_magnitude_jet_id_output': 'categorical_accuracy'},
+                            weighted_metrics = {'prune_low_magnitude_jet_id_output': 'categorical_accuracy'})
 
     print(pruned_model.summary())
 
@@ -125,6 +127,28 @@ def train_weights(y_train, truth_pt_train, class_labels, pt_flat_weighting=True)
     # Normalize sample weights
     sample_weights = sample_weights / np.mean(sample_weights)
 
+def generate_data(num_sets, max_samples, num_channels):
+    X = []
+    y = []
+    
+    for _ in range(num_sets):
+        num_samples = np.random.randint(1, max_samples + 1)  # Random number of samples per set
+        set_samples = np.random.randn(num_samples, num_channels)  # Random features
+        
+        # Define the function: sum all elements in the set
+        target = np.sum(set_samples)  # Regression task
+        
+        X.append(set_samples)
+        y.append(target)
+    
+    # Convert y to numpy array
+    y = np.array(y).reshape(-1, 1)
+    
+    # Pad sequences for batch training
+    X = keras.preprocessing.sequence.pad_sequences(X, padding="post", dtype="float32")
+    
+    return X, y
+
 def train(out_dir, percent, model_name):
 
     #Remove output dir if exists
@@ -135,22 +159,27 @@ def train(out_dir, percent, model_name):
     #Create dir to save results
     os.makedirs(out_dir)
 
+    num_sets = 500000
+    max_samples = 10
+    num_channels = 5
     #Load the data, class_labels and input variables name, not really using input variable names to be honest
-    data_train, data_test, class_labels, input_vars, extra_vars = load_data("training_data/", percentage=percent)
+    X_train, y_train = generate_data(num_sets, max_samples, num_channels)
+    
+    # data_train, data_test, class_labels, input_vars, extra_vars = load_data("training_data/", percentage=percent)
     
     #Save input variables and extra variables metadata
-    with open(os.path.join(out_dir, "input_vars.json"), "w") as f: json.dump(input_vars, f, indent=4) #Dump output variables
-    with open(os.path.join(out_dir, "extra_vars.json"), "w") as f: json.dump(extra_vars, f, indent=4) #Dump output variables
+    # with open(os.path.join(out_dir, "input_vars.json"), "w") as f: json.dump(input_vars, f, indent=4) #Dump output variables
+    # with open(os.path.join(out_dir, "extra_vars.json"), "w") as f: json.dump(extra_vars, f, indent=4) #Dump output variables
 
     #Make into ML-like data for training
-    X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(data_train, class_labels)
+    # X_train, y_train, pt_target_train, truth_pt_train, reco_pt_train = to_ML(data_train, class_labels)
 
     #Save X_test, y_test, and truth_pt_test for plotting later
-    X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
-    save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test, class_labels)
+    # X_test, y_test, _, truth_pt_test, reco_pt_test = to_ML(data_test, class_labels)
+    # save_test_data(out_dir, X_test, y_test, truth_pt_test, reco_pt_test, class_labels)
 
     #Calculate the sample weights for training
-    sample_weight = train_weights(y_train, truth_pt_train, class_labels)
+    # sample_weight = train_weights(y_train, truth_pt_train, class_labels)
 
     #Get input shape
     input_shape = X_train.shape[1:] #First dimension is batch size
@@ -173,8 +202,8 @@ def train(out_dir, percent, model_name):
                  ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-5)]
 
     history = pruned_model.fit({'model_input': X_train},
-                            {'prune_low_magnitude_jet_id_output': y_train, 'prune_low_magnitude_pT_output': pt_target_train},
-                            sample_weight=sample_weight,
+                            {'prune_low_magnitude_jet_id_output': y_train},
+                            # sample_weight=sample_weight,
                             epochs=EPOCHS,
                             batch_size=BATCH_SIZE,
                             verbose=2,
@@ -189,12 +218,12 @@ def train(out_dir, percent, model_name):
     model_export.save(export_path)
     print(f"Model saved to {export_path}")
 
-    #Produce some basic plots with the training for diagnostics
-    plot_path = os.path.join(out_dir, "plots/training")
-    os.makedirs(plot_path, exist_ok=True)
+    # #Produce some basic plots with the training for diagnostics
+    # plot_path = os.path.join(out_dir, "plots/training")
+    # os.makedirs(plot_path, exist_ok=True)
 
-    #Plot history
-    loss_history(plot_path, history)
+    # #Plot history
+    # loss_history(plot_path, history)
 
     return
 
@@ -221,29 +250,32 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    mlflow.set_experiment(os.getenv('CI_COMMIT_REF_NAME'))
+    # mlflow.set_experiment(os.getenv('CI_COMMIT_REF_NAME'))
 
     #Either make data or start the training
-    if args.make_data:
+    # if args.make_data:
+    if False:
         make_data(infile=args.input, step_size=args.step, extras=args.extras, ratio=args.ratio, tree=args.tree) #Write to training_data/, can be specified using outdir, but keeping it simple here for now
-    elif args.plot_basic:
-        model_dir = args.output
-        f = open("mlflow_run_id.txt", "r")
-        run_id = (f.read())
-        mlflow.get_experiment_by_name(os.getenv('CI_COMMIT_REF_NAME'))
-        with mlflow.start_run(experiment_id=1,
-                            run_name=args.name,
-                            run_id=run_id # pass None to start a new run
-                            ):
+    # elif args.plot_basic:
+    # elif False:
 
-            #All the basic plots!
-            results = basic(model_dir)
-            for class_label in results.keys():
-                mlflow.log_metric(class_label + ' ROC AUC',results[class_label])
+        # model_dir = args.output
+        # f = open("mlflow_run_id.txt", "r")
+        # run_id = (f.read())
+        # mlflow.get_experiment_by_name(os.getenv('CI_COMMIT_REF_NAME'))
+        # with mlflow.start_run(experiment_id=1,
+        #                     run_name=args.name,
+        #                     run_id=run_id # pass None to start a new run
+        #                     ):
+
+        #     #All the basic plots!
+        #     results = basic(model_dir)
+        #     for class_label in results.keys():
+        #         mlflow.log_metric(class_label + ' ROC AUC',results[class_label])
             
     else:
         with mlflow.start_run(run_name=args.name) as run:
-            mlflow.set_tag('gitlab.CI_JOB_ID', os.getenv('CI_JOB_ID'))
+            # mlflow.set_tag('gitlab.CI_JOB_ID', os.getenv('CI_JOB_ID'))
             mlflow.keras.autolog()
             train(args.output, args.percent, model_name=args.model)
             run_id = run.info.run_id
