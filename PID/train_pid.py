@@ -2,6 +2,8 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from tensorflow.keras.models import load_model
 
 import sys
 import os
@@ -33,6 +35,29 @@ VALIDATION_SPLIT = 0.1 # 10% of training set will be used for validation set.
 # Sparsity parameters
 I_SPARSITY = 0.0 #Initial sparsity
 F_SPARSITY = 0.1 #Final sparsity
+
+def prune_model(model, num_samples):
+    """
+    Pruning settings for the model. Return the pruned model
+    """
+
+    print("Begin pruning the model...")
+
+    #Calculate the ending step for pruning
+    end_step = np.ceil(num_samples / BATCH_SIZE).astype(np.int32) * EPOCHS
+
+    #Define the pruned model
+    pruning_params = {'pruning_schedule': tfmot.sparsity.keras.PolynomialDecay(initial_sparsity=I_SPARSITY, final_sparsity=F_SPARSITY, begin_step=0, end_step=end_step)}
+    pruned_model = tfmot.sparsity.keras.prune_low_magnitude(model, **pruning_params)
+
+    pruned_model.compile(optimizer='adam',
+                            loss={'prune_low_magnitude_jet_id_output': 'categorical_crossentropy', 'prune_low_magnitude_pT_output': tf.keras.losses.Huber()},
+                            metrics = {'prune_low_magnitude_jet_id_output': 'categorical_accuracy', 'prune_low_magnitude_pT_output': ['mae', 'mean_squared_error']},
+                            weighted_metrics = {'prune_low_magnitude_jet_id_output': 'categorical_accuracy', 'prune_low_magnitude_pT_output': ['mae', 'mean_squared_error']})
+
+    print(pruned_model.summary())
+
+    return pruned_model
 
 def get_test_model(num_channels):
 
@@ -119,18 +144,28 @@ def train_qkeras_model():
     model = baseline_float((0, num_channels), (1, 1))
     model.compile(optimizer="adam", loss="mse", metrics=["mae"])
 
-    X_train, y_train = generate_data(num_sets, max_samples, num_channels)
-    X_test, y_test = generate_data(1000, max_samples, num_channels)
+    # X_train, y_train = generate_data(num_sets, max_samples, num_channels)
+    # X_test, y_test = generate_data(1000, max_samples, num_channels)
     # save_data(X_train, y_train, X_test, y_test)
     
-    # X_train, y_train, X_test, y_test = load_data()
+    X_train, y_train, X_test, y_test = load_data()
 
-    history = model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=EPOCHS, batch_size=BATCH_SIZE)
+    checkpoint_filepath = "PID/dummy_qkeras_no_mask.h5"
+    callbacks = [EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True, mode="min", verbose=1),
+                 ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-5),
+                 ModelCheckpoint(filepath=checkpoint_filepath, monitor="val_loss", save_best_only=True, save_weights_only=False, mode="min", verbose=1)]
+    
+    history = model.fit(X_train, y_train,
+                            epochs=EPOCHS,
+                            batch_size=BATCH_SIZE,
+                            verbose=2,
+                            validation_data=(X_test, y_test),
+                            # validation_split=VALIDATION_SPLIT,
+                            callbacks = [callbacks],
+                            shuffle=True)
+    # model = load_model(checkpoint_filepath)
 
-    model.evaluate(X_test, y_test)
-    
-    model.save("PID/dummy_qkeras_no_mask.h5")
-    
+    model.evaluate(X_test, y_test)    
     utils.plot_losses(history)
 
 if __name__ == "__main__":
