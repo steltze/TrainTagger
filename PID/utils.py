@@ -14,5 +14,5 @@ def plot_losses(history):
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True)
-    plt.savefig('training_loss_plot.png', dpi=300)  # Saves as a high-resolution PNG file
+    plt.savefig('PID/training_loss_plot.png', dpi=300)  # Saves as a high-resolution PNG file
     plt.show()

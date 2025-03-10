@@ -9,6 +9,7 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
 from tagger.train.models import baseline
+from float_model import baseline_float
 import utils
 
 num_threads = 8
@@ -82,39 +83,56 @@ def generate_data(num_sets, max_samples, num_channels):
 def train_test_model():
     num_channels = 10    
     
-    num_sets = 5000
+    num_sets = 500000
     max_samples = 20
     num_channels = 10
 
     X_train, y_train = generate_data(num_sets, max_samples, num_channels)
     
-    model = baseline((0, num_channels), (1, 1))
-    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
-
-
-
+    model = get_test_model(num_channels)
     model.fit(X_train, y_train, epochs=10, batch_size=32)
 
     X_test, y_test = generate_data(100, max_samples, num_channels)
 
     model.evaluate(X_test, y_test)
+
+def save_data(X_train, y_train, X_test, y_test):
+    np.save("PID/X_train.npy", X_train) 
+    np.save("PID/y_train.npy", y_train)
+    np.save("PID/X_test.npy", X_test)
+    np.save("PID/y_test.npy", y_test)
+    
+def load_data():
+    X_train = np.load("PID/X_train.npy") 
+    y_train = np.load("PID/y_train.npy")
+    X_test = np.load("PID/X_test.npy")
+    y_test = np.load("PID/y_test.npy")
+    
+    return X_train, y_train, X_test, y_test
     
 def train_qkeras_model():
     num_channels = 10 
-    model = get_test_model(num_channels)
 
-    num_sets = 50000
+    num_sets = 500000
     max_samples = 20
     num_channels = 10
+    model = baseline_float((0, num_channels), (1, 1))
+    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
 
     X_train, y_train = generate_data(num_sets, max_samples, num_channels)
     X_test, y_test = generate_data(1000, max_samples, num_channels)
+    # save_data(X_train, y_train, X_test, y_test)
+    
+    # X_train, y_train, X_test, y_test = load_data()
 
-    history = model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=10, batch_size=32)
+    history = model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=EPOCHS, batch_size=BATCH_SIZE)
 
     model.evaluate(X_test, y_test)
+    
+    model.save("PID/dummy_qkeras_no_mask.h5")
     
     utils.plot_losses(history)
 
 if __name__ == "__main__":
+    # train_test_model()
     train_qkeras_model()

@@ -49,7 +49,7 @@ def baseline(inputs_shape, output_shape, bits=9, bits_int=2, alpha_val=1):
     jet_id = QActivation(activation=quantized_relu(bits), name='relu_2_jetID')(jet_id)
 
     jet_id = QDense(output_shape[0], name='Dense_3_jetID', **common_args)(jet_id)
-    jet_id = Activation('softmax', name='jet_id_output')(jet_id)
+    jet_id = Activation('linear', name='jet_id_output')(jet_id)
 
     # #pT regression branch
     # pt_regress = QDense(10, name='Dense_1_pT', **common_args)(main)
