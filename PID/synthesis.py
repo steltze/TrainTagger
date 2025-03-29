@@ -80,6 +80,6 @@ if __name__ == "__main__":
     # args = parser.parse_args()
 
     #Load the model
-    model_path = "PID/dummy_qkeras_no_mask.h5"
+    model_path = "PID/dummy_keras.h5"
     model = load_qmodel(model_path)
     precisions = convert(model, "")

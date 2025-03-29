@@ -4,17 +4,17 @@ from tensorflow.keras import layers
 import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras.models import load_model
-
 import sys
 import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
-from tagger.train.models import baseline
-from float_model import baseline_float
+# from tagger.train.models import baseline
+from float_model import baseline_float, dense_model, CHARGE_DIV, baseline_with_correlation
 import utils
+from normalize_data import transform_train_set
 
-num_threads = 8
+num_threads = 12
 os.environ["OMP_NUM_THREADS"] = str(num_threads)
 os.environ["TF_NUM_INTRAOP_THREADS"] = str(num_threads)
 os.environ["TF_NUM_INTEROP_THREADS"] = str(num_threads)
@@ -29,7 +29,7 @@ tf.config.threading.set_intra_op_parallelism_threads(
 # GLOBAL PARAMETERS TO BE DEFINED WHEN TRAINING
 tf.keras.utils.set_random_seed(420) #not a special number 
 BATCH_SIZE = 1024
-EPOCHS = 100
+EPOCHS = 500
 VALIDATION_SPLIT = 0.1 # 10% of training set will be used for validation set. 
 
 # Sparsity parameters
@@ -140,34 +140,84 @@ def train_qkeras_model():
 
     num_sets = 500000
     max_samples = 20
-    num_channels = 10
-    model = baseline_float((0, num_channels), (1, 1))
-    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
-
-    # X_train, y_train = generate_data(num_sets, max_samples, num_channels)
-    # X_test, y_test = generate_data(1000, max_samples, num_channels)
-    # save_data(X_train, y_train, X_test, y_test)
+    num_channels = 4
     
-    X_train, y_train, X_test, y_test = load_data()
+    # X_train, y_train, X_test, y_test = load_data()
+    data_path = "/eos/home-s/stzelepi/PixESL/Datasets/"
+    X_train = np.load(data_path + "filtered_phi_thera_charge_inputs_1.npy")[:, :4, :]
+    # print(X_train[:3])
+    # X_train[:, :, 0] = X_train[:, :, 0]/128
+    # X_train[:, :, 1] = X_train[:, :, 1]/128
+    # X_train[:, :, 2] = X_train[:, :, 2]/X_train[:, :, 2].mean()
+    # X_train[:, :, 3] = X_train[:, :, 3]/X_train[:, :, 3].mean()
+    
+    y_train = np.load(data_path + "filtered_phi_thera_charge_outputs_1.npy")[:, 1:]
+    # y_train[:, 0] = y_train[:, 0]/y_train[:, 0].mean()
+    # y_train[:, 1] = y_train[:, 1]/y_train[:, 1].mean()
 
-    checkpoint_filepath = "PID/dummy_qkeras_no_mask.h5"
-    callbacks = [EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True, mode="min", verbose=1),
-                 ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-5),
-                 ModelCheckpoint(filepath=checkpoint_filepath, monitor="val_loss", save_best_only=True, save_weights_only=False, mode="min", verbose=1)]
+
+    
+    for index in range(2, 5):
+        file_x = f"filtered_phi_thera_charge_inputs_{index}.npy"
+        file_y = f"filtered_phi_thera_charge_outputs_{index}.npy"
+        X = np.load(data_path + file_x)[:, :4, :]
+        y = np.load(data_path + file_y)[:, 1:]
+        X_train = np.vstack((X_train, X))
+        y_train = np.vstack((y_train, y))
+    
+    # X_train = transform_train_set(X_train)
+
+    indices = np.arange(X_train.shape[0])  # Create an index array [0, 1, 2, ..., 149]
+    np.random.shuffle(indices)             # Shuffle the indices
+
+    # Step 2: Apply shuffled indices to both arrays
+
+    # X_train[:, :, 0] /= 128
+    # X_train[:, :, 1] /= 128
+    # X_train[:, :, 2] /= 35_000
+    # X_train[:, :, 3] /= CHARGE_DIV
+    X_train = X_train[indices][:100000]
+    y_train = y_train[indices][:100000]
+
+    print("Number of samples = ", X_train.shape, y_train.shape)
+
+    KERNEL_SIZE = 1
+    FILTERS = 32
+    NEURONS_1 = 128
+    NEURONS_2 = 64
+    # model = baseline_float(X_train.shape, y_train.shape, kernel_size=KERNEL_SIZE, filters=FILTERS, neurons_1=NEURONS_1, neurons_2=NEURONS_2)
+    model = baseline_float(X_train.shape, y_train.shape, kernel_size=KERNEL_SIZE, filters=FILTERS, neurons_1=NEURONS_1, neurons_2=NEURONS_2)
+
+    
+    if y_train.shape[-1] == 1:
+        checkpoint_filepath = f"models/dummy_keras_particle_ks_{KERNEL_SIZE}_f_{FILTERS}_n1_{NEURONS_1}_n2_{NEURONS_2}.h5"
+    else:
+        checkpoint_filepath = f"models/dummy_keras_phi_thera_charge_ks_{KERNEL_SIZE}_f_{FILTERS}_n1_{NEURONS_1}_n2_{NEURONS_2}.h5"
+        
+    callbacks = [
+                # EarlyStopping(monitor="val_loss", patience=50, restore_best_weights=True, mode="min", verbose=1),
+                ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=20, min_lr=1e-5),
+                # ModelCheckpoint(filepath=checkpoint_filepath, monitor="val_loss", save_best_only=True, save_weights_only=False, mode="min", verbose=1)
+                ]
     
     history = model.fit(X_train, y_train,
                             epochs=EPOCHS,
                             batch_size=BATCH_SIZE,
                             verbose=2,
-                            validation_data=(X_test, y_test),
-                            # validation_split=VALIDATION_SPLIT,
+                            # validation_data=(X_test, y_test),
+                            validation_split=VALIDATION_SPLIT,
                             callbacks = [callbacks],
                             shuffle=True)
-    # model = load_model(checkpoint_filepath)
 
+    utils.plot_losses(history, kernel_size=KERNEL_SIZE, filters=FILTERS, neurons_1=NEURONS_1, neurons_2=NEURONS_2, particle=y_train.shape[-1])
+
+def validate_model(path_to_model="models/dummy_keras_ks_1_f_4_n1_64_n2_32.h5", path_to_data_X="/home/stzelepi/PixESL/pixesl/ML/X_R=6.2mm,2chip_dump_11_2_0.npy", path_to_data_y="/home/stzelepi/PixESL/pixesl/ML/y_R=6.2mm,2chip_dump_11_2_0.npy"):
+    model = load_model(path_to_model)
+    X_test = np.load(path_to_data_X)
+    y_test = np.load(path_to_data_y)
     model.evaluate(X_test, y_test)    
-    utils.plot_losses(history)
 
 if __name__ == "__main__":
     # train_test_model()
     train_qkeras_model()
+    # validate_model()
