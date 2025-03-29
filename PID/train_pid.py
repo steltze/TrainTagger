@@ -3,7 +3,6 @@ from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from tensorflow.keras.models import load_model
 import sys
 import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -58,133 +57,16 @@ def prune_model(model, num_samples):
     print(pruned_model.summary())
 
     return pruned_model
-
-def get_test_model(num_channels):
-
-    # Input: A set of samples (None means arbitrary number of samples per set)
-    inputs = keras.Input(shape=(None, num_channels))  # Variable-length inputs
-    masked_inputs = layers.Masking(mask_value=0.0)(inputs)  # Ignore padded values
-
-    # Process the set with Phi
-    phi = layers.TimeDistributed(layers.Dense(32, activation="relu"))(masked_inputs)
-    phi = layers.TimeDistributed(layers.Dense(64, activation="relu"))(phi)
-
-    # Sum over non-masked elements
-    phi_sum = tf.reduce_sum(phi, axis=1)
-
-    # ρ: Apply final MLP
-    rho = layers.Dense(64, activation="relu")(phi_sum)
-    rho = layers.Dense(32, activation="relu")(rho)
-    outputs = layers.Dense(1, activation="linear")(rho)
-
-    model = keras.Model(inputs, outputs)
-    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
-
-    model.summary()
-    return model
-
-def generate_data(num_sets, max_samples, num_channels):
-    X = []
-    y = []
-    
-    for _ in range(num_sets):
-        num_samples = np.random.randint(1, max_samples + 1)
-        set_samples = np.random.randn(num_samples, num_channels)
-        
-        # Define the function: sum all elements in the set
-        target = np.sum(set_samples)  # Regression task
-        
-        X.append(set_samples)
-        y.append(target)
-    
-    # Convert y to numpy array
-    y = np.array(y).reshape(-1, 1)
-    
-    # Pad sequences for batch training
-    X = keras.preprocessing.sequence.pad_sequences(X, padding="post", dtype="float32")
-    
-    return X, y
-
-def train_test_model():
-    num_channels = 10    
-    
-    num_sets = 500000
-    max_samples = 20
-    num_channels = 10
-
-    X_train, y_train = generate_data(num_sets, max_samples, num_channels)
-    
-    model = get_test_model(num_channels)
-    model.fit(X_train, y_train, epochs=10, batch_size=32)
-
-    X_test, y_test = generate_data(100, max_samples, num_channels)
-
-    model.evaluate(X_test, y_test)
-
-def save_data(X_train, y_train, X_test, y_test):
-    np.save("PID/X_train.npy", X_train) 
-    np.save("PID/y_train.npy", y_train)
-    np.save("PID/X_test.npy", X_test)
-    np.save("PID/y_test.npy", y_test)
-    
-def load_data():
-    X_train = np.load("PID/X_train.npy") 
-    y_train = np.load("PID/y_train.npy")
-    X_test = np.load("PID/X_test.npy")
-    y_test = np.load("PID/y_test.npy")
-    
-    return X_train, y_train, X_test, y_test
     
 def train_qkeras_model():
-    num_channels = 10 
-
-    num_sets = 500000
-    max_samples = 20
-    num_channels = 4
-    
-    # X_train, y_train, X_test, y_test = load_data()
-    data_path = "/eos/home-s/stzelepi/PixESL/Datasets/"
-    X_train = np.load(data_path + "filtered_phi_thera_charge_inputs_1.npy")[:, :4, :]
-    # print(X_train[:3])
-    # X_train[:, :, 0] = X_train[:, :, 0]/128
-    # X_train[:, :, 1] = X_train[:, :, 1]/128
-    # X_train[:, :, 2] = X_train[:, :, 2]/X_train[:, :, 2].mean()
-    # X_train[:, :, 3] = X_train[:, :, 3]/X_train[:, :, 3].mean()
-    
-    y_train = np.load(data_path + "filtered_phi_thera_charge_outputs_1.npy")[:, 1:]
-    # y_train[:, 0] = y_train[:, 0]/y_train[:, 0].mean()
-    # y_train[:, 1] = y_train[:, 1]/y_train[:, 1].mean()
-
-
-    
-    for index in range(2, 5):
-        file_x = f"filtered_phi_thera_charge_inputs_{index}.npy"
-        file_y = f"filtered_phi_thera_charge_outputs_{index}.npy"
-        X = np.load(data_path + file_x)[:, :4, :]
-        y = np.load(data_path + file_y)[:, 1:]
-        X_train = np.vstack((X_train, X))
-        y_train = np.vstack((y_train, y))
-    
-    # X_train = transform_train_set(X_train)
-
-    indices = np.arange(X_train.shape[0])  # Create an index array [0, 1, 2, ..., 149]
-    np.random.shuffle(indices)             # Shuffle the indices
-
-    # Step 2: Apply shuffled indices to both arrays
-
-    # X_train[:, :, 0] /= 128
-    # X_train[:, :, 1] /= 128
-    # X_train[:, :, 2] /= 35_000
-    # X_train[:, :, 3] /= CHARGE_DIV
-    X_train = X_train[indices][:100000]
-    y_train = y_train[indices][:100000]
+    X_train, y_train = utils.prepare_dataset()
 
     print("Number of samples = ", X_train.shape, y_train.shape)
 
     KERNEL_SIZE = 1
-    FILTERS = 32
-    NEURONS_1 = 128
-    NEURONS_2 = 64
+    FILTERS = 16
+    NEURONS_1 = 64
+    NEURONS_2 = 32
     # model = baseline_float(X_train.shape, y_train.shape, kernel_size=KERNEL_SIZE, filters=FILTERS, neurons_1=NEURONS_1, neurons_2=NEURONS_2)
     model = baseline_float(X_train.shape, y_train.shape, kernel_size=KERNEL_SIZE, filters=FILTERS, neurons_1=NEURONS_1, neurons_2=NEURONS_2)
 
@@ -195,9 +77,9 @@ def train_qkeras_model():
         checkpoint_filepath = f"models/dummy_keras_phi_thera_charge_ks_{KERNEL_SIZE}_f_{FILTERS}_n1_{NEURONS_1}_n2_{NEURONS_2}.h5"
         
     callbacks = [
-                # EarlyStopping(monitor="val_loss", patience=50, restore_best_weights=True, mode="min", verbose=1),
+                EarlyStopping(monitor="val_loss", patience=50, restore_best_weights=True, mode="min", verbose=1),
                 ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=20, min_lr=1e-5),
-                # ModelCheckpoint(filepath=checkpoint_filepath, monitor="val_loss", save_best_only=True, save_weights_only=False, mode="min", verbose=1)
+                ModelCheckpoint(filepath=checkpoint_filepath, monitor="val_loss", save_best_only=True, save_weights_only=False, mode="min", verbose=1)
                 ]
     
     history = model.fit(X_train, y_train,
@@ -211,13 +93,10 @@ def train_qkeras_model():
 
     utils.plot_losses(history, kernel_size=KERNEL_SIZE, filters=FILTERS, neurons_1=NEURONS_1, neurons_2=NEURONS_2, particle=y_train.shape[-1])
 
-def validate_model(path_to_model="models/dummy_keras_ks_1_f_4_n1_64_n2_32.h5", path_to_data_X="/home/stzelepi/PixESL/pixesl/ML/X_R=6.2mm,2chip_dump_11_2_0.npy", path_to_data_y="/home/stzelepi/PixESL/pixesl/ML/y_R=6.2mm,2chip_dump_11_2_0.npy"):
-    model = load_model(path_to_model)
-    X_test = np.load(path_to_data_X)
-    y_test = np.load(path_to_data_y)
-    model.evaluate(X_test, y_test)    
-
 if __name__ == "__main__":
     # train_test_model()
-    train_qkeras_model()
-    # validate_model()
+    # train_qkeras_model()
+  
+    X_train, y_train = utils.prepare_dataset()
+    utils.predict_and_plot_error_curves("/home/stzelepi/PixESL/my_fork/TrainTagger/PID/models/dummy_keras_phi_thera_charge_ks_1_f_16_n1_64_n2_32.h5" \
+        , X_train, y_train)
